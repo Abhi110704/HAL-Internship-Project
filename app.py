@@ -70,7 +70,7 @@ def advanced_confidence_score(gray_crop):
     norm_dist = dist_to_center / (gray_crop.shape[1] / 2)
     return round(max(0, 1 - norm_dist), 3)
 
-def simulate_detection(img, name, corrections, prefer_symmetry, model=None):
+def simulate_detection(img, name, corrections, prefer_symmetry, model=None, is_2d_diagram=False):
     arr = np.array(img)
     h, w = arr.shape[:2]
     img_center_x = w // 2
@@ -86,14 +86,29 @@ def simulate_detection(img, name, corrections, prefer_symmetry, model=None):
     crop = img.crop((x1, y1, x2, y2)).convert("L")
     gray = np.array(crop)
 
-    total = np.sum(gray)
-    com_x = (x1 + x2) / 2 if total == 0 else np.sum(gray * np.arange(gray.shape[1])[None, :]) / total + x1
-    com_side = "🅻 Left" if com_x < img_center_x else "🆁 Right"
-
-    symmetry_side, sim_score = predict_side_by_symmetry(gray)
-    confidence = advanced_confidence_score(gray)
-
-    predicted = symmetry_side if prefer_symmetry else com_side
+    # 2D Diagram robust logic
+    if is_2d_diagram:
+        # Use bounding box center for orientation
+        cx = (x1 + x2) // 2
+        margin = int(w * 0.05)
+        if cx < (w // 2 - margin):
+            predicted = "🅻 Left"
+        elif cx > (w // 2 + margin):
+            predicted = "🆁 Right"
+        else:
+            predicted = "Center"
+        com_side = predicted
+        symmetry_side = predicted
+        sim_score = 1.0
+        confidence = 1.0
+        com_x = cx
+    else:
+        total = np.sum(gray)
+        com_x = (x1 + x2) / 2 if total == 0 else np.sum(gray * np.arange(gray.shape[1])[None, :]) / total + x1
+        com_side = "🅻 Left" if com_x < img_center_x else "🆁 Right"
+        symmetry_side, sim_score = predict_side_by_symmetry(gray)
+        confidence = advanced_confidence_score(gray)
+        predicted = symmetry_side if prefer_symmetry else com_side
 
     corrected = corrections[corrections.Image == name]
     final = corrected["Corrected Side"].values[0] if not corrected.empty else predicted
@@ -104,7 +119,7 @@ def simulate_detection(img, name, corrections, prefer_symmetry, model=None):
         "Final Side": final,
         "Confidence Score": confidence,
         "X-Coordinate": int(com_x),
-        "Symmetry Score": round(sim_score, 3),
+        "Symmetry Score": round(sim_score, 3) if not is_2d_diagram else 1.0,
         "COM Side": com_side,
         "Symmetry Side": symmetry_side
     }
@@ -141,6 +156,8 @@ input_mode = st.sidebar.radio("Select Image Source", ["Upload Images", "Use Came
 rotate_option = st.sidebar.checkbox("🔄 Auto-Rotate Images")
 prefer_symmetry = st.sidebar.checkbox("🧠 Prefer Symmetry Over COM")
 only_final = st.sidebar.checkbox("📌 Show Only Final Prediction")
+# Add 2D Diagram Mode
+is_2d_diagram = st.sidebar.checkbox("2D Diagram Mode (for sketches/blueprints)")
 
 st.sidebar.header("📦 Model Upload")
 model_file = st.sidebar.file_uploader("Upload YOLOv8 .pt Model (optional)", type="pt")
@@ -203,12 +220,12 @@ if images:
                     scaled = img.copy()
                     w, h = scaled.size
                     scaled = scaled.resize((int(w * zoom / 100), int(h * zoom / 100)))
-                    pred = simulate_detection(scaled, image_names[i + j], corrections, prefer_symmetry, model)
+                    pred = simulate_detection(scaled, image_names[i + j], corrections, prefer_symmetry, model, is_2d_diagram)
                     with cols[j]:
                         st.image(scaled, caption=f"{image_names[i + j]}\nPrediction: {pred['Final Side']}", use_container_width=True)
 
     for img, name in zip(images, image_names):
-        result = simulate_detection(img, name, corrections, prefer_symmetry, model)
+        result = simulate_detection(img, name, corrections, prefer_symmetry, model, is_2d_diagram)
         results.append(result)
         with st.form(f"correction_{name}"):
             st.write(f"✍️ Suggest correction for: **{name}**")
@@ -217,18 +234,38 @@ if images:
             if submit and corrected:
                 save_correction(name, corrected)
                 st.success(f"✅ Correction saved for {name} as {corrected}")
+                st.rerun()
 
 if results:
     df = pd.DataFrame(results)
+    # Add Manual Correction and Final Prediction columns
+    corrections_map = {row['Image']: row['Corrected Side'] for _, row in load_corrections().iterrows()}
+    df['Manual Correction'] = df['Image'].map(corrections_map).fillna("")
+    df['Final Prediction'] = df['Manual Correction'].where(df['Manual Correction'] != "", df['Predicted Side'])
+
+    # Reorder columns for clarity
+    display_cols = [
+        'Image',
+        'Predicted Side',
+        'Manual Correction',
+        'Final Prediction',
+        'Confidence Score',
+        'X-Coordinate',
+        'Symmetry Score',
+        'COM Side',
+        'Symmetry Side'
+    ]
+    df = df[display_cols]
+
     if filter_side != "All":
-        df = df[df["Final Side"].str.contains(filter_side)]
+        df = df[df['Final Prediction'].str.contains(filter_side)]
     if only_final:
-        df = df[["Image", "Final Side", "Confidence Score"]]
+        df = df[['Image', 'Final Prediction', 'Confidence Score']]
 
     st.markdown("### ✅ Final Prediction Summary")
     st.dataframe(df, use_container_width=True)
 
-    corrected_df = df[df.Image.isin(load_corrections().Image)]
+    corrected_df = df[df['Manual Correction'] != ""]
     st.download_button("📥 Download CSV", corrected_df.to_csv(index=False).encode(), "HAL_Part_Detection.csv")
 else:
     st.info("📸 Please upload or capture an image to begin analysis.")
