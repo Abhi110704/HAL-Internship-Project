@@ -1,7 +1,0 @@
-streamlit
-pandas
-Pillow
-numpy
-opencv-python
-scipy
-ultralytics
