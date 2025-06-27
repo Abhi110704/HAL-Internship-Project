@@ -1,8 +1,9 @@
-streamlit==1.35.0
-opencv-python==4.9.0.80
-numpy==1.26.4
-Pillow==10.3.0
-fpdf==1.7.2
-scikit-image==0.23.2
-ultralytics==8.1.34
-pandas==2.2.2
+streamlit
+opencv-python
+numpy
+Pillow
+reportlab
+scikit-image
+ultralytics
+pandas
+torch
