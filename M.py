@@ -12,7 +12,6 @@ from ultralytics import YOLO
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Paths for images
-EMBLEM_PATH = os.path.join(BASE_DIR, "Emblem of India.png")
 LOGO_PATH = os.path.join(BASE_DIR, "hal_logo.png")
 
 # === PAGE CONFIG ===
