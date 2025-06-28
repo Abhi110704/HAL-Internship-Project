@@ -71,7 +71,7 @@ python -m streamlit run M.py
 6. View results, download reports, and ensure quality!
 
 ## 👩‍💻 Developers
-- Abhiyanshi Anand
+- Abhiyanshu Anand
 - Ishaan Tripathi
 
 ## 🏛️ About HAL
