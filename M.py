@@ -55,7 +55,7 @@ This site provides AI-powered defect detection for aircraft parts using image co
 Hindustan Aeronautics Limited (HAL) is an Indian state-owned aerospace and defence company. HAL is involved in the design, fabrication, and assembly of aircraft, jet engines, helicopters, and their spare parts.
 
 ---
-#### 👩‍💻 Developed by Abhiyanshi Anand and Ishaan Tripathi
+#### 👩‍💻 Developed by Abhiyanshu Anand and Ishaan Tripathi
 """)
     st.markdown("---")
 
