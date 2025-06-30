@@ -2,7 +2,6 @@ streamlit
 opencv-python
 numpy
 Pillow
-reportlab
 scikit-image
 ultralytics
 pandas
