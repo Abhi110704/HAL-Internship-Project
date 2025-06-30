@@ -88,6 +88,35 @@ with st.expander("📖 How to Use", expanded=True):
     
     > **Note:** For best results, upload images in the same orientation and with similar zoom (scale). The system will try to auto-align and scale images, but similar field of view improves accuracy and speed.
     """)
+    
+    st.markdown("""
+    ---
+    **🛠️ How to Use Detection Sensitivity Controls**
+    
+    **English:**
+    - Go to the sidebar on the left side of the app.
+    - Find the section titled **Detection Sensitivity Controls**.
+    - Adjust the sliders for each parameter as needed:
+        - If you want to catch even the smallest defects, move the sliders to lower values.
+        - If you only care about major defects, move the sliders to higher values.
+    - After adjusting, upload your images or re-run the analysis to see the effect.
+    
+    **Hindi:**
+    - App ke left sidebar mein jayein.
+    - **Detection Sensitivity Controls** section dekhein.
+    - Har parameter ke slider ko zarurat ke hisaab se adjust karein:
+        - Agar aap chhote defects bhi dhoondhna chahte hain, sliders ko kam value par le aayein.
+        - Sirf bade defects chahiye toh sliders ko jyada value par le jayein.
+    - Adjust karne ke baad images upload karein ya analysis dobara run karein aur result dekhein.
+    
+    **What Each Control Does:**
+    | Control Name                | English Description                                                                 | Hindi Description                                                                 |
+    |-----------------------------|-------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------|
+    | **SSIM Defect Threshold**   | Lower value = more sensitive to small defects. Higher value = only big defects.     | Kam value = chhote defects bhi milenge. Jyada value = sirf bade defects milenge.   |
+    | **Color Defect Threshold**  | Lower value = detects even small color changes. Higher = only big color changes.    | Kam value = chhote color changes bhi milenge. Jyada value = sirf bade color changes.|
+    | **Pattern Min Matches**     | Lower value = less strict pattern matching. Higher = more strict, fewer mismatches. | Kam value = pattern matching me jyada lenient. Jyada value = jyada strict.         |
+    | **YOLO Confidence Threshold**| Lower value = more detections (may include false positives). Higher = more strict. | Kam value = jyada detections (galat bhi ho sakte hain). Jyada value = jyada strict.|
+    """)
 
 # === FUNCTIONS ===
 
