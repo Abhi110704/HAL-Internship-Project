@@ -417,7 +417,13 @@ if ref_files and test_files:
                         "x": x1, "y": y1, "width": x2 - x1, "height": y2 - y1,
                         "confidence": f"{conf:.2f}", "defect_type": label
                     })
-                st.image(result_img, channels="BGR", caption="📦 YOLOv8 Results")
+                # Side-by-side comparison for YOLO
+                st.subheader("📸 Side-by-Side Comparison (YOLO)")
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.image(ref, channels="BGR", caption=f"🟢 Reference Image {ref_idx+1}")
+                with col2:
+                    st.image(result_img, channels="BGR", caption="📦 YOLOv8 Results")
                 if defect_table:
                     st.subheader("📋 YOLOv8 Detected Defects")
                     df = pd.DataFrame(defect_table)
@@ -433,7 +439,13 @@ if ref_files and test_files:
             else:
                 st.subheader("🧠 AI Detected Defects (Image Comparison)")
                 result_img, detected_boxes, defect_percent, diff_img, mask_img = detect_defects(ref, test_aligned)
-                st.image(result_img, channels="BGR", caption="🔴 Differences Highlighted")
+                # Side-by-side comparison for SSIM
+                st.subheader("📸 Side-by-Side Comparison (SSIM)")
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.image(ref, channels="BGR", caption=f"🟢 Reference Image {ref_idx+1}")
+                with col2:
+                    st.image(result_img, channels="BGR", caption="🔴 Defective Image (Differences Highlighted)")
                 st.image(diff_img, caption="SSIM Difference Image", clamp=True)
                 st.image(mask_img, caption="Defect Mask", clamp=True)
                 if defect_percent > 0.5:
