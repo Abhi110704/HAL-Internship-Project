@@ -85,10 +85,10 @@ with st.expander("📖 How to Use", expanded=True):
     2. **Upload a Test Image** – The image to inspect.
     3. **(Optional)** Upload a YOLOv8 `.pt` model file.
     4. View AI results via image comparison or deep learning detection.
-    
+    5. Adjust the detection sensitivity controls to fine-tune the results.
     > **Note:** For best results, upload images in the same orientation and with similar zoom (scale). The system will try to auto-align and scale images, but similar field of view improves accuracy and speed.
     """)
-    
+
     st.markdown("""
     ---
     **🛠️ How to Use Detection Sensitivity Controls**
@@ -98,14 +98,14 @@ with st.expander("📖 How to Use", expanded=True):
         - If you want to catch even the smallest defects, move the sliders to lower values.
         - If you only care about major defects, move the sliders to higher values.
     - After adjusting, upload your images or re-run the analysis to see the effect.
-   
+    
     **What Each Control Does:**
-    | Control Name                | English Description                                                                 | Hindi Description                                                                 |
-    |-----------------------------|-------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------|
-    | **SSIM Defect Threshold**   | Lower value = more sensitive to small defects. Higher value = only big defects.     | Kam value = chhote defects bhi milenge. Jyada value = sirf bade defects milenge.   |
-    | **Color Defect Threshold**  | Lower value = detects even small color changes. Higher = only big color changes.    | Kam value = chhote color changes bhi milenge. Jyada value = sirf bade color changes.|
-    | **Pattern Min Matches**     | Lower value = less strict pattern matching. Higher = more strict, fewer mismatches. | Kam value = pattern matching me jyada lenient. Jyada value = jyada strict.         |
-    | **YOLO Confidence Threshold**| Lower value = more detections (may include false positives). Higher = more strict. | Kam value = jyada detections (galat bhi ho sakte hain). Jyada value = jyada strict.|
+    | Control Name                | English Description                                                                 |
+    |-----------------------------|-------------------------------------------------------------------------------------|
+    | **SSIM Defect Threshold**   | Lower value = more sensitive to small defects. Higher value = only big defects.     |
+    | **Color Defect Threshold**  | Lower value = detects even small color changes. Higher = only big color changes.    |
+    | **Pattern Min Matches**     | Lower value = less strict pattern matching. Higher = more strict, fewer mismatches. |
+    | **YOLO Confidence Threshold**| Lower value = more detections (may include false positives). Higher = more strict. |
     """)
 
 # === FUNCTIONS ===
