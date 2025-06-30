@@ -92,8 +92,6 @@ with st.expander("📖 How to Use", expanded=True):
     st.markdown("""
     ---
     **🛠️ How to Use Detection Sensitivity Controls**
-    
-    **English:**
     - Go to the sidebar on the left side of the app.
     - Find the section titled **Detection Sensitivity Controls**.
     - Adjust the sliders for each parameter as needed:
