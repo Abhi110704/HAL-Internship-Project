@@ -100,15 +100,7 @@ with st.expander("📖 How to Use", expanded=True):
         - If you want to catch even the smallest defects, move the sliders to lower values.
         - If you only care about major defects, move the sliders to higher values.
     - After adjusting, upload your images or re-run the analysis to see the effect.
-    
-    **Hindi:**
-    - App ke left sidebar mein jayein.
-    - **Detection Sensitivity Controls** section dekhein.
-    - Har parameter ke slider ko zarurat ke hisaab se adjust karein:
-        - Agar aap chhote defects bhi dhoondhna chahte hain, sliders ko kam value par le aayein.
-        - Sirf bade defects chahiye toh sliders ko jyada value par le jayein.
-    - Adjust karne ke baad images upload karein ya analysis dobara run karein aur result dekhein.
-    
+   
     **What Each Control Does:**
     | Control Name                | English Description                                                                 | Hindi Description                                                                 |
     |-----------------------------|-------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------|
