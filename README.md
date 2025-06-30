@@ -9,6 +9,7 @@ This project provides a user-friendly interface for detecting defects in aircraf
 - Upload **multiple reference** and **multiple test images** for multi-angle, multi-reference analysis
 - Optional upload of custom YOLOv8 model (.pt) for deep learning-based detection
 - Visual and tabular defect reports for every (reference, test) pair
+- Side-by-side comparison of reference and defective (highlighted) image for both SSIM and YOLO detection, making visual inspection easier
 - Downloadable CSV reports (per pair and summary)
 - Sidebar controls for detection sensitivity (SSIM, color, pattern, YOLO confidence)
 - Toggle buttons for enabling/disabling color, DeltaE (LAB), and pattern defect detection
@@ -68,7 +69,8 @@ python -m streamlit run M.py
 3. (Optional) Upload a YOLOv8 `.pt` model for advanced detection.
 4. Adjust detection sensitivity in the sidebar.
 5. Use toggles on the main page to enable/disable color, DeltaE, and pattern detection.
-6. View results, download reports, and ensure quality!
+6. View side-by-side comparison of reference and defective (highlighted) image for both SSIM and YOLO detection.
+7. View results, download reports, and ensure quality!
 
 ## 👩‍💻 Developers
 - Abhiyanshu Anand
