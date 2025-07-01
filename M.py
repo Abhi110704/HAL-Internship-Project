@@ -259,7 +259,7 @@ def align_images(ref_img, test_img):
     aligned_test, alignment_good, method_used = superpoint_align(ref_img, test_img)
     if aligned_test is not None:
         return aligned_test, alignment_good, method_used
-    # 2. Try SIFT if available
+    # 2. Try SIFT feature-based alignment (handles scale/zoom)
     try:
         sift = cv2.SIFT_create()
         ref_gray = cv2.cvtColor(ref_img, cv2.COLOR_BGR2GRAY)
@@ -274,17 +274,18 @@ def align_images(ref_img, test_img):
                 if m.distance < 0.75 * n.distance:
                     good.append(m)
             if len(good) > 10:
+                # Use homography to handle scale/zoom/rotation/translation
                 src_pts = np.float32([kp1[m.queryIdx].pt for m in good]).reshape(-1, 1, 2)
                 dst_pts = np.float32([kp2[m.trainIdx].pt for m in good]).reshape(-1, 1, 2)
                 M, mask = cv2.findHomography(dst_pts, src_pts, cv2.RANSAC, 5.0)
                 h, w = ref_img.shape[:2]
                 aligned_test = cv2.warpPerspective(test_img, M, (w, h))
-                alignment_good = len(good) > 30
-                method_used = "SIFT"
+                alignment_good = len(good) > 30 and M is not None
+                method_used = "SIFT-Homography"
                 return aligned_test, alignment_good, method_used
     except Exception as e:
         pass
-    # 3. Try ORB as fallback
+    # 3. Try ORB feature-based alignment (handles scale/zoom)
     ref_gray = cv2.cvtColor(ref_img, cv2.COLOR_BGR2GRAY)
     test_gray = cv2.cvtColor(test_img, cv2.COLOR_BGR2GRAY)
     orb = cv2.ORB_create(3000)
@@ -300,8 +301,8 @@ def align_images(ref_img, test_img):
             M, mask = cv2.findHomography(dst_pts, src_pts, cv2.RANSAC, 5.0)
             h, w = ref_img.shape[:2]
             aligned_test = cv2.warpPerspective(test_img, M, (w, h))
-            alignment_good = len(matches) > 30
-            method_used = "ORB"
+            alignment_good = len(matches) > 30 and M is not None
+            method_used = "ORB-Homography"
             return aligned_test, alignment_good, method_used
     # 4. Fallback: Multi-scale template matching for zoomed-in test images
     best_val = -1
@@ -391,12 +392,34 @@ model_file = st.file_uploader("🤖 (Optional) Upload YOLOv8 Model (.pt)", type=
 if ref_files and test_files:
     any_defect = False
     summary_rows = []
+    
+    # Cache all test file bytes before the main loop
+    test_file_bytes_list = []
+    test_file_names = []
+    for test_file in test_files:
+        test_file.seek(0)
+        test_bytes = test_file.read()
+        test_file_bytes_list.append(test_bytes)
+        test_file_names.append(test_file.name)
+    
     for ref_idx, ref_file in enumerate(ref_files):
         ref_bytes = ref_file.read()
+        if not ref_bytes:
+            st.error(f"Reference image file {ref_file.name} is empty or could not be read.")
+            continue
         ref = cv2.imdecode(np.frombuffer(ref_bytes, np.uint8), cv2.IMREAD_COLOR)
-        for test_idx, test_file in enumerate(test_files):
-            test_bytes = test_file.read()
+        if ref is None:
+            st.error(f"Uploaded reference image {ref_file.name} is not a valid image file.")
+            continue
+            
+        for test_idx, test_bytes in enumerate(test_file_bytes_list):
+            if not test_bytes:
+                st.error(f"Test image file {test_file_names[test_idx]} is empty or could not be read.")
+                continue
             test = cv2.imdecode(np.frombuffer(test_bytes, np.uint8), cv2.IMREAD_COLOR)
+            if test is None:
+                st.error(f"Uploaded test image {test_file_names[test_idx]} is not a valid image file.")
+                continue
             st.markdown(f"## 🖼️ Reference {ref_idx+1} vs Test {test_idx+1}")
             if ref is not None and test is not None:
                 test = auto_rotate_image(test, ref)
