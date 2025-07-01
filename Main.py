@@ -175,9 +175,11 @@ def superpoint_align(ref_img, test_img):
     except Exception as e:
         return None, False, f"SuperPoint error: {e}"
 def align_images(ref_img, test_img):
+    # Try SuperPoint deep keypoint alignment first
     aligned_test, alignment_good, method_used = superpoint_align(ref_img, test_img)
     if aligned_test is not None:
         return aligned_test, alignment_good, method_used
+    # Try SIFT feature-based alignment (handles scale/zoom)
     try:
         sift = cv2.SIFT_create()
         ref_gray = cv2.cvtColor(ref_img, cv2.COLOR_BGR2GRAY)
@@ -192,16 +194,18 @@ def align_images(ref_img, test_img):
                 if m.distance < 0.75 * n.distance:
                     good.append(m)
             if len(good) > 10:
+                # Use homography to handle scale/zoom/rotation/translation
                 src_pts = np.float32([kp1[m.queryIdx].pt for m in good]).reshape(-1, 1, 2)
                 dst_pts = np.float32([kp2[m.trainIdx].pt for m in good]).reshape(-1, 1, 2)
                 M, mask = cv2.findHomography(dst_pts, src_pts, cv2.RANSAC, 5.0)
                 h, w = ref_img.shape[:2]
                 aligned_test = cv2.warpPerspective(test_img, M, (w, h))
-                alignment_good = len(good) > 30
-                method_used = "SIFT"
+                alignment_good = len(good) > 30 and M is not None
+                method_used = "SIFT-Homography"
                 return aligned_test, alignment_good, method_used
     except Exception as e:
         pass
+    # Try ORB feature-based alignment (handles scale/zoom)
     ref_gray = cv2.cvtColor(ref_img, cv2.COLOR_BGR2GRAY)
     test_gray = cv2.cvtColor(test_img, cv2.COLOR_BGR2GRAY)
     orb = cv2.ORB_create(3000)
@@ -217,9 +221,10 @@ def align_images(ref_img, test_img):
             M, mask = cv2.findHomography(dst_pts, src_pts, cv2.RANSAC, 5.0)
             h, w = ref_img.shape[:2]
             aligned_test = cv2.warpPerspective(test_img, M, (w, h))
-            alignment_good = len(matches) > 30
-            method_used = "ORB"
+            alignment_good = len(matches) > 30 and M is not None
+            method_used = "ORB-Homography"
             return aligned_test, alignment_good, method_used
+    # Fallback: Multi-scale template matching for zoomed-in test images
     best_val = -1
     best_scale = 1.0
     best_loc = None
