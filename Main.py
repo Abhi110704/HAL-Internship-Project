@@ -11,6 +11,9 @@ import sys
 import skimage.exposure
 from skimage import color as skcolor
 from skimage.restoration import denoise_bilateral
+from scipy.ndimage import binary_opening, binary_closing
+from skimage import measure
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 LOGO_PATH = os.path.join(BASE_DIR, "hal_logo.png")
 st.set_page_config(page_title="🛠️ HAL Parts Defect Detection 🛠️", layout="centered")
@@ -44,241 +47,29 @@ st.markdown(
 color_toggle = st.checkbox("Enable Color Defect Detection", value=True)
 deltae_toggle = st.checkbox("Enable DeltaE (LAB) Color Defect Detection", value=True)
 pattern_toggle = st.checkbox("Enable Pattern Defect Detection", value=True)
-def histogram_match(source, reference):
-    matched = skimage.exposure.match_histograms(source, reference, channel_axis=-1)
-    return matched
-def preprocess_image(img):
-    img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    img = cv2.fastNlMeansDenoising(img, None, 10, 7, 21)
-    thresh = cv2.adaptiveThreshold(img, 255, cv2.ADAPTIVE_THRESH_MEAN_C,
-                                   cv2.THRESH_BINARY_INV, 15, 10)
-    return thresh
-def classify_defect(area, w, h):
-    aspect_ratio = w / h
-    if area > 2000 and aspect_ratio > 2:
-        return "Scratch"
-    elif area > 2000:
-        return "Dent"
-    elif area < 2000:
-        return "Crack"
-    else:
-        return "Unknown"
-def detect_defects(ref_img, test_img):
-    ref = cv2.resize(ref_img, (512, 512))
-    test = cv2.resize(test_img, (512, 512))
-    test = histogram_match(test, ref)
-    ref = cv2.fastNlMeansDenoisingColored(ref, None, 10, 10, 7, 21)
-    test = cv2.fastNlMeansDenoisingColored(test, None, 10, 10, 7, 21)
-    ref_gray = cv2.cvtColor(ref, cv2.COLOR_BGR2GRAY)
-    test_gray = cv2.cvtColor(test, cv2.COLOR_BGR2GRAY)
-    if np.std(ref_gray) < 30 and np.std(test_gray) < 30:
-        ref_proc = preprocess_image(ref)
-        test_proc = preprocess_image(test)
-    else:
-        ref_proc = ref_gray
-        test_proc = test_gray
-    score, diff = ssim(ref_proc, test_proc, full=True)
-    diff = (diff * 255).astype("uint8")
-    kernel = np.ones((3,3), np.uint8)
-    diff = cv2.morphologyEx(diff, cv2.MORPH_OPEN, kernel)
-    thresh = cv2.threshold(diff, ssim_thresh, 255, cv2.THRESH_BINARY_INV)[1]
-    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    output_img = test.copy()
-    boxes = []
-    for contour in contours:
-        area = cv2.contourArea(contour)
-        if area > 100:
-            x, y, w, h = cv2.boundingRect(contour)
-            cv2.rectangle(output_img, (x, y), (x+w, y+h), (0, 0, 255), 2)
-            boxes.append({
-                "x": x, "y": y, "width": w, "height": h,
-                "area": area,
-                "defect_type": classify_defect(area, w, h)
-            })
-    total_area = 512 * 512
-    defect_area = sum([b['area'] for b in boxes])
-    defect_percent = (defect_area / total_area) * 100
-    return output_img, boxes, defect_percent, diff, thresh
-def superpoint_align(ref_img, test_img):
-    try:
-        import torch
-        import urllib.request
-        import os
-        import cv2
-        import numpy as np
-        model_url = 'https://github.com/magicleap/SuperPointPretrainedNetwork/raw/master/superpoint_v1.pth'
-        model_path = 'superpoint_v1.pth'
-        if not os.path.exists(model_path):
-            with st.spinner('Downloading SuperPoint model...'):
-                urllib.request.urlretrieve(model_url, model_path)
-        class SuperPointNet(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.relu = torch.nn.ReLU(inplace=True)
-                self.pool = torch.nn.MaxPool2d(2, 2)
-                self.conv1 = torch.nn.Conv2d(1, 64, 3, 1, 1)
-                self.conv2 = torch.nn.Conv2d(64, 64, 3, 1, 1)
-                self.conv3 = torch.nn.Conv2d(64, 128, 3, 1, 1)
-                self.conv4 = torch.nn.Conv2d(128, 128, 3, 1, 1)
-                self.conv5 = torch.nn.Conv2d(128, 256, 3, 1, 1)
-                self.conv6 = torch.nn.Conv2d(256, 256, 3, 1, 1)
-                self.conv7 = torch.nn.Conv2d(256, 65, 1, 1, 0)
-                self.conv8 = torch.nn.Conv2d(256, 256, 1, 1, 0)
-            def forward(self, x):
-                x = self.relu(self.conv1(x))
-                x = self.relu(self.conv2(x))
-                x = self.pool(x)
-                x = self.relu(self.conv3(x))
-                x = self.relu(self.conv4(x))
-                x = self.pool(x)
-                x = self.relu(self.conv5(x))
-                x = self.relu(self.conv6(x))
-                cPa = self.conv7(x)
-                cDa = self.conv8(x)
-                return cPa, cDa
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        model = SuperPointNet().to(device)
-        model.load_state_dict(torch.load(model_path, map_location=device))
-        model.eval()
-        def extract_superpoint_keypoints(img):
-            img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-            img = cv2.resize(img, (320, 240))
-            timg = torch.from_numpy(img/255.).float().unsqueeze(0).unsqueeze(0).to(device)
-            with torch.no_grad():
-                cPa, _ = model(timg)
-            prob = torch.nn.functional.softmax(cPa, 1)[0, :-1, :, :]
-            prob = prob.cpu().numpy()
-            keypoints = np.argwhere(prob > 0.015)
-            keypoints = [(float(x[2]*4), float(x[1]*4)) for x in keypoints]
-            return keypoints
-        kp1 = extract_superpoint_keypoints(ref_img)
-        kp2 = extract_superpoint_keypoints(test_img)
-        if len(kp1) < 10 or len(kp2) < 10:
-            return None, False, "SuperPoint (few keypoints)"
-        matches = []
-        for i, pt1 in enumerate(kp1):
-            dists = [np.linalg.norm(np.array(pt1)-np.array(pt2)) for pt2 in kp2]
-            if len(dists) == 0:
-                continue
-            min_idx = np.argmin(dists)
-            if dists[min_idx] < 50:
-                matches.append((i, min_idx))
-        if len(matches) > 10:
-            src_pts = np.float32([kp1[i] for i, _ in matches]).reshape(-1, 1, 2)
-            dst_pts = np.float32([kp2[j] for _, j in matches]).reshape(-1, 1, 2)
-            M, mask = cv2.findHomography(dst_pts, src_pts, cv2.RANSAC, 5.0)
-            h, w = ref_img.shape[:2]
-            aligned_test = cv2.warpPerspective(test_img, M, (w, h))
-            alignment_good = len(matches) > 30
-            return aligned_test, alignment_good, "SuperPoint"
-        return None, False, "SuperPoint (few matches)"
-    except Exception as e:
-        return None, False, f"SuperPoint error: {e}"
-def align_images(ref_img, test_img):
-    # Try SuperPoint deep keypoint alignment first
-    aligned_test, alignment_good, method_used = superpoint_align(ref_img, test_img)
-    if aligned_test is not None:
-        return aligned_test, alignment_good, method_used
-    # Try SIFT feature-based alignment (handles scale/zoom)
-    try:
-        sift = cv2.SIFT_create()
-        ref_gray = cv2.cvtColor(ref_img, cv2.COLOR_BGR2GRAY)
-        test_gray = cv2.cvtColor(test_img, cv2.COLOR_BGR2GRAY)
-        kp1, des1 = sift.detectAndCompute(ref_gray, None)
-        kp2, des2 = sift.detectAndCompute(test_gray, None)
-        if des1 is not None and des2 is not None:
-            matcher = cv2.BFMatcher()
-            matches = matcher.knnMatch(des1, des2, k=2)
-            good = []
-            for m, n in matches:
-                if m.distance < 0.75 * n.distance:
-                    good.append(m)
-            if len(good) > 10:
-                # Use homography to handle scale/zoom/rotation/translation
-                src_pts = np.float32([kp1[m.queryIdx].pt for m in good]).reshape(-1, 1, 2)
-                dst_pts = np.float32([kp2[m.trainIdx].pt for m in good]).reshape(-1, 1, 2)
-                M, mask = cv2.findHomography(dst_pts, src_pts, cv2.RANSAC, 5.0)
-                h, w = ref_img.shape[:2]
-                aligned_test = cv2.warpPerspective(test_img, M, (w, h))
-                alignment_good = len(good) > 30 and M is not None
-                method_used = "SIFT-Homography"
-                return aligned_test, alignment_good, method_used
-    except Exception as e:
-        pass
-    # Try ORB feature-based alignment (handles scale/zoom)
-    ref_gray = cv2.cvtColor(ref_img, cv2.COLOR_BGR2GRAY)
-    test_gray = cv2.cvtColor(test_img, cv2.COLOR_BGR2GRAY)
-    orb = cv2.ORB_create(3000)
-    kp1, des1 = orb.detectAndCompute(ref_gray, None)
-    kp2, des2 = orb.detectAndCompute(test_gray, None)
-    if des1 is not None and des2 is not None:
-        matcher = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
-        matches = matcher.match(des1, des2)
-        matches = sorted(matches, key=lambda x: x.distance)
-        if len(matches) > 10:
-            src_pts = np.float32([kp1[m.queryIdx].pt for m in matches]).reshape(-1, 1, 2)
-            dst_pts = np.float32([kp2[m.trainIdx].pt for m in matches]).reshape(-1, 1, 2)
-            M, mask = cv2.findHomography(dst_pts, src_pts, cv2.RANSAC, 5.0)
-            h, w = ref_img.shape[:2]
-            aligned_test = cv2.warpPerspective(test_img, M, (w, h))
-            alignment_good = len(matches) > 30 and M is not None
-            method_used = "ORB-Homography"
-            return aligned_test, alignment_good, method_used
-    # Fallback: Multi-scale template matching for zoomed-in test images
-    best_val = -1
-    best_scale = 1.0
-    best_loc = None
-    best_size = None
-    for scale in np.linspace(0.5, 2.0, 20):
-        try:
-            resized = cv2.resize(test_gray, (0, 0), fx=scale, fy=scale)
-            if resized.shape[0] > ref_gray.shape[0] or resized.shape[1] > ref_gray.shape[1]:
-                continue
-            res = cv2.matchTemplate(ref_gray, resized, cv2.TM_CCOEFF_NORMED)
-            min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(res)
-            if max_val > best_val:
-                best_val = max_val
-                best_scale = scale
-                best_loc = max_loc
-                best_size = resized.shape
-        except Exception as e:
-            continue
-    if best_val > 0.6 and best_loc is not None:
-        x, y = best_loc
-        h, w = best_size
-        aligned_test = np.zeros_like(ref_img)
-        resized_color = cv2.resize(test_img, (w, h))
-        aligned_test[y:y+h, x:x+w] = resized_color
-        alignment_good = True
-        method_used = "TemplateMatching"
-        return aligned_test, alignment_good, method_used
-    method_used = "None"
-    return test_img, False, method_used
-def detect_color_defects(ref_img, test_img, threshold=15):
-    ref_lab = skcolor.rgb2lab(cv2.cvtColor(ref_img, cv2.COLOR_BGR2RGB))
-    test_lab = skcolor.rgb2lab(cv2.cvtColor(test_img, cv2.COLOR_BGR2RGB))
-    delta_e = skcolor.deltaE_ciede2000(ref_lab, test_lab)
-    mask = delta_e > threshold
-    color_defect_img = test_img.copy()
-    color_defect_img[mask] = [0, 255, 255]
-    defect_area = np.sum(mask)
-    total_area = mask.size
-    defect_percent = (defect_area / total_area) * 100
-    return color_defect_img, mask, defect_percent, delta_e
-def detect_pattern_defects(ref_img, test_img, min_matches=10):
-    ref_gray = cv2.cvtColor(ref_img, cv2.COLOR_BGR2GRAY)
-    test_gray = cv2.cvtColor(test_img, cv2.COLOR_BGR2GRAY)
-    orb = cv2.ORB_create(3000)
-    kp1, des1 = orb.detectAndCompute(ref_gray, None)
-    kp2, des2 = orb.detectAndCompute(test_gray, None)
-    if des1 is None or des2 is None:
-        return test_img, 0, []
-    bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
-    matches = bf.match(des1, des2)
-    matches = sorted(matches, key=lambda x: x.distance)
-    pattern_img = cv2.drawMatches(ref_img, kp1, test_img, kp2, matches[:min_matches], None, flags=2)
-    num_matches = len(matches)
-    return pattern_img, num_matches, matches
+
+# Robust preprocessing for any image
+
+def robust_preprocess(img):
+    if img is None:
+        return None
+    # Convert grayscale to BGR
+    if len(img.shape) == 2 or (len(img.shape) == 3 and img.shape[2] == 1):
+        img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+    # Denoise
+    img = cv2.fastNlMeansDenoisingColored(img, None, 10, 10, 7, 21)
+    # Sharpen
+    kernel = np.array([[0, -1, 0], [-1, 5,-1], [0, -1, 0]])
+    img = cv2.filter2D(img, -1, kernel)
+    # CLAHE
+    lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
+    l, a, b = cv2.split(lab)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+    cl = clahe.apply(l)
+    limg = cv2.merge((cl,a,b))
+    img = cv2.cvtColor(limg, cv2.COLOR_LAB2BGR)
+    return img
+
 def auto_rotate_image(test_img, ref_img):
     best_img = test_img
     best_score = -1
@@ -296,6 +87,87 @@ def auto_rotate_image(test_img, ref_img):
             best_score = score
             best_img = rotated_resized
     return best_img
+
+def align_images(ref_img, test_img):
+    # Try ORB feature-based alignment
+    ref_gray = cv2.cvtColor(ref_img, cv2.COLOR_BGR2GRAY)
+    test_gray = cv2.cvtColor(test_img, cv2.COLOR_BGR2GRAY)
+    orb = cv2.ORB_create(3000)
+    kp1, des1 = orb.detectAndCompute(ref_gray, None)
+    kp2, des2 = orb.detectAndCompute(test_gray, None)
+    if des1 is not None and des2 is not None:
+        matcher = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
+        matches = matcher.match(des1, des2)
+        matches = sorted(matches, key=lambda x: x.distance)
+        if len(matches) > 10:
+            src_pts = np.float32([kp1[m.queryIdx].pt for m in matches]).reshape(-1, 1, 2)
+            dst_pts = np.float32([kp2[m.trainIdx].pt for m in matches]).reshape(-1, 1, 2)
+            M, mask = cv2.findHomography(dst_pts, src_pts, cv2.RANSAC, 5.0)
+            h, w = ref_img.shape[:2]
+            aligned_test = cv2.warpPerspective(test_img, M, (w, h))
+            return aligned_test
+    # Fallback: auto-rotate
+    return auto_rotate_image(test_img, ref_img)
+
+def draw_defect_boundaries(image, mask, color=(0, 0, 255), thickness=5):
+    mask = (mask > 0).astype(np.uint8)
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    overlay = (image * 0.6).astype(np.uint8)
+    cv2.drawContours(overlay, contours, -1, color, thickness)
+    for cnt in contours:
+        x, y, w, h = cv2.boundingRect(cnt)
+        cv2.rectangle(overlay, (x, y), (x+w, y+h), (0,255,0), 3)
+    return overlay
+
+def detect_ssim_defects(ref_img, test_img, ssim_thresh=220):
+    ref = cv2.resize(ref_img, (512, 512))
+    test = cv2.resize(test_img, (512, 512))
+    ref_gray = cv2.cvtColor(ref, cv2.COLOR_BGR2GRAY)
+    test_gray = cv2.cvtColor(test, cv2.COLOR_BGR2GRAY)
+    score, diff = ssim(ref_gray, test_gray, full=True)
+    diff = (diff * 255).astype("uint8")
+    kernel = np.ones((3,3), np.uint8)
+    diff = cv2.morphologyEx(diff, cv2.MORPH_OPEN, kernel)
+    mask = cv2.threshold(diff, ssim_thresh, 255, cv2.THRESH_BINARY_INV)[1]
+    mask = binary_opening(mask, structure=np.ones((3,3))).astype(np.uint8)
+    mask = binary_closing(mask, structure=np.ones((5,5))).astype(np.uint8)
+    area = np.sum(mask > 0)
+    percent = (area / (512*512)) * 100
+    marked = draw_defect_boundaries(test, mask, color=(0,0,255), thickness=5)
+    return marked, mask, percent
+
+def detect_color_defects_with_map(ref_img, test_img, color_thresh=15):
+    ref_lab = skcolor.rgb2lab(cv2.cvtColor(ref_img, cv2.COLOR_BGR2RGB))
+    test_lab = skcolor.rgb2lab(cv2.cvtColor(test_img, cv2.COLOR_BGR2RGB))
+    delta_e = skcolor.deltaE_ciede2000(ref_lab, test_lab)
+    mask = (delta_e > color_thresh).astype(np.uint8)
+    mask = binary_opening(mask, structure=np.ones((5,5))).astype(np.uint8)
+    mask = binary_closing(mask, structure=np.ones((7,7))).astype(np.uint8)
+    area = np.sum(mask > 0)
+    percent = (area / mask.size) * 100
+    marked = draw_defect_boundaries(test_img, mask, color=(255,0,255), thickness=5)
+    # Normalize deltaE map for visualization
+    delta_e_norm = ((delta_e - np.min(delta_e)) / (np.ptp(delta_e) + 1e-8) * 255).astype(np.uint8)
+    delta_e_color = cv2.applyColorMap(delta_e_norm, cv2.COLORMAP_JET)
+    # Resize deltaE map to match marked image size
+    if delta_e_color.shape[:2] != marked.shape[:2]:
+        delta_e_color = cv2.resize(delta_e_color, (marked.shape[1], marked.shape[0]), interpolation=cv2.INTER_NEAREST)
+    return marked, mask*255, percent, delta_e_color
+
+def detect_pattern_defects(ref_img, test_img, min_matches=10):
+    ref_gray = cv2.cvtColor(ref_img, cv2.COLOR_BGR2GRAY)
+    test_gray = cv2.cvtColor(test_img, cv2.COLOR_BGR2GRAY)
+    orb = cv2.ORB_create(3000)
+    kp1, des1 = orb.detectAndCompute(ref_gray, None)
+    kp2, des2 = orb.detectAndCompute(test_gray, None)
+    if des1 is None or des2 is None:
+        return test_img, 0
+    bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
+    matches = bf.match(des1, des2)
+    matches = sorted(matches, key=lambda x: x.distance)
+    pattern_img = cv2.drawMatches(ref_img, kp1, test_img, kp2, matches[:min_matches], None, flags=2)
+    num_matches = len(matches)
+    return pattern_img, num_matches
 
 ref_files = st.file_uploader("📁 Upload Reference Images (Multi-Angle)", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
 test_files = st.file_uploader("🧪 Upload Test Images (Multi-Angle)", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
@@ -331,16 +203,14 @@ if ref_files and test_files:
             st.markdown(f"## 🖼️ Reference {ref_idx+1} vs Test {test_idx+1}")
             if ref is not None and test is not None:
                 test = auto_rotate_image(test, ref)
-            test_aligned, alignment_good, align_method = align_images(ref, test)
+            test_aligned = align_images(ref, test)
             st.subheader("📸 Uploaded Images")
             col1, col2 = st.columns(2)
             with col1:
                 st.image(ref, channels="BGR", caption=f"🟢 Reference Image {ref_idx+1}")
             with col2:
                 st.image(test, channels="BGR", caption=f"🔍 Test Image {test_idx+1}")
-            st.info(f"Alignment method used: {align_method}")
-            if not alignment_good:
-                st.warning("⚠️ The uploaded images may have very different zoom/scale/orientation or content. Results may not be accurate. Try to upload images with similar field of view and scale.")
+            st.info(f"Alignment method used: ORB feature-based alignment")
             if model_file:
                 st.subheader("🧠 YOLOv8 AI Detection")
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".pt") as tmp:
@@ -385,44 +255,63 @@ if ref_files and test_files:
                     summary_rows.append({"Reference": ref_idx+1, "Test": test_idx+1, "Type": "YOLO", "Defect": False})
             else:
                 st.subheader("🧠 AI Detected Defects (Image Comparison)")
-                result_img, detected_boxes, defect_percent, diff_img, mask_img = detect_defects(ref, test_aligned)
-                st.subheader("📸 Side-by-Side Comparison (SSIM)")
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.image(ref, channels="BGR", caption=f"🟢 Reference Image {ref_idx+1}")
-                with col2:
-                    st.image(result_img, channels="BGR", caption="🔴 Defective Image (Differences Highlighted)")
-                st.image(diff_img, caption="SSIM Difference Image", clamp=True)
-                st.image(mask_img, caption="Defect Mask", clamp=True)
-                if defect_percent > 0.5:
-                    st.error(f"⚠️ Defects Found: {defect_percent:.2f}% of the area")
+                ssim_marked, ssim_mask, ssim_percent = detect_ssim_defects(ref, test_aligned, ssim_thresh=ssim_thresh)
+                st.subheader("SSIM Defect Detection")
+                # Set a slightly smaller display size for all images
+                image_width = 210
+                image_height = 210
+                # Resize all SSIM images to the same size
+                ssim_marked_resized = cv2.resize(ssim_marked, (image_width, image_height), interpolation=cv2.INTER_AREA)
+                ssim_mask_resized = cv2.resize(ssim_mask, (image_width, image_height), interpolation=cv2.INTER_NEAREST)
+                ssim_diff = cv2.absdiff(cv2.cvtColor(ref, cv2.COLOR_BGR2GRAY), cv2.cvtColor(test_aligned, cv2.COLOR_BGR2GRAY))
+                ssim_diff_resized = cv2.resize(ssim_diff, (image_width, image_height), interpolation=cv2.INTER_AREA)
+                # Create a red overlay for the SSIM defect mask
+                ssim_mask_color = np.zeros_like(ssim_marked_resized)
+                if len(ssim_mask_resized.shape) == 2:
+                    mask_bool = ssim_mask_resized > 0
+                    ssim_mask_color[mask_bool] = [255, 0, 0]  # Red for defects
+                # Blend with the test image for semi-transparent overlay
+                ssim_overlay = cv2.addWeighted(ssim_marked_resized, 0.7, ssim_mask_color, 0.6, 0)
+                # SSIM display with overlay
+                st.subheader("SSIM Defect Detection")
+                ssim_col1, ssim_spacer1, ssim_col2, ssim_spacer2, ssim_col3 = st.columns([1,0.1,1,0.1,1])
+                with ssim_col1:
+                    st.image(ssim_marked_resized, channels="BGR", caption=f"SSIM Marked (Area: {ssim_percent:.2f}%)", width=image_width)
+                with ssim_col2:
+                    st.image(ssim_overlay, channels="BGR", caption="SSIM Defect Mask (Overlay)", width=image_width)
+                with ssim_col3:
+                    st.image(ssim_diff_resized, caption="SSIM Diff Image", clamp=True, width=image_width)
+                # Color/DeltaE
+                color_marked, color_mask, color_percent, delta_e_map = detect_color_defects_with_map(ref, test_aligned, color_thresh=color_thresh)
+                color_marked_resized = cv2.resize(color_marked, (image_width, image_height), interpolation=cv2.INTER_AREA)
+                color_mask_resized = cv2.resize(color_mask, (image_width, image_height), interpolation=cv2.INTER_NEAREST)
+                delta_e_map_resized = cv2.resize(delta_e_map, (image_width, image_height), interpolation=cv2.INTER_AREA)
+                st.subheader("Color/DeltaE Defect Detection")
+                color_col1, color_spacer1, color_col2, color_spacer2, color_col3 = st.columns([1,0.1,1,0.1,1])
+                with color_col1:
+                    st.image(color_marked_resized, channels="BGR", caption=f"Color/DeltaE Marked (Area: {color_percent:.2f}%)", width=image_width)
+                with color_col2:
+                    st.image(color_mask_resized, caption="Color/DeltaE Defect Mask", clamp=True, width=image_width)
+                with color_col3:
+                    st.image(delta_e_map_resized, caption="DeltaE Map", clamp=True, width=image_width)
+                if ssim_percent > 0.5:
+                    st.error(f"⚠️ Defects Found: {ssim_percent:.2f}% of the area")
                     any_defect = True
                     summary_rows.append({"Reference": ref_idx+1, "Test": test_idx+1, "Type": "SSIM", "Defect": True})
                 else:
                     st.success("✅ No major defects detected 🎈")
                     summary_rows.append({"Reference": ref_idx+1, "Test": test_idx+1, "Type": "SSIM", "Defect": False})
-                if detected_boxes:
-                    st.subheader("📋 Defect Table")
-                    df = pd.DataFrame(detected_boxes)
-                    st.dataframe(df)
-                    csv = df.to_csv(index=False).encode()
-                    st.download_button(f"⬇️ Download Defect Report (CSV) - Ref{ref_idx+1}_Test{test_idx+1}", csv, f"defect_report_ref{ref_idx+1}_test{test_idx+1}.csv", "text/csv")
-                if color_toggle and deltae_toggle:
-                    st.subheader("🎨 Color Defect Detection (Delta E 2000)")
-                    color_img, color_mask, color_defect_percent, delta_e_img = detect_color_defects(ref, test_aligned, threshold=color_thresh)
-                    st.image(color_img, channels="BGR", caption="🟡 Color Differences Highlighted")
-                    st.image(delta_e_img, caption="Delta E Map", clamp=True)
-                    if color_defect_percent > 0.5:
-                        st.error(f"⚠️ Color Defects Found: {color_defect_percent:.2f}% of the area")
-                        any_defect = True
-                        summary_rows.append({"Reference": ref_idx+1, "Test": test_idx+1, "Type": "Color", "Defect": True})
-                    else:
-                        st.success("✅ No major color defects detected 🎈")
-                        summary_rows.append({"Reference": ref_idx+1, "Test": test_idx+1, "Type": "Color", "Defect": False})
+                if color_percent > 0.5:
+                    st.error(f"⚠️ Color Defects Found: {color_percent:.2f}% of the area")
+                    any_defect = True
+                    summary_rows.append({"Reference": ref_idx+1, "Test": test_idx+1, "Type": "Color", "Defect": True})
+                else:
+                    st.success("✅ No major color defects detected 🎈")
+                    summary_rows.append({"Reference": ref_idx+1, "Test": test_idx+1, "Type": "Color", "Defect": False})
                 if pattern_toggle:
                     st.subheader("🔳 Pattern Defect Detection (ORB)")
-                    pattern_img, num_matches, matches = detect_pattern_defects(ref, test_aligned, min_matches=pattern_min_matches)
-                    st.image(pattern_img, channels="BGR", caption=f"Pattern Matches: {num_matches}")
+                    pattern_img, num_matches = detect_pattern_defects(ref, test_aligned, min_matches=pattern_min_matches)
+                    st.image(pattern_img, channels="BGR", caption=f"Pattern Matching (ORB) - Matches: {num_matches}")
                     if num_matches < pattern_min_matches:
                         st.error("⚠️ Pattern mismatch detected!")
                         any_defect = True
