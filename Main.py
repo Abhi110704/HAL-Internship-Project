@@ -13,6 +13,7 @@ from skimage import color as skcolor
 from skimage.restoration import denoise_bilateral
 from scipy.ndimage import binary_opening, binary_closing
 from skimage import measure
+import logging
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 LOGO_PATH = os.path.join(BASE_DIR, "hal_logo.png")
@@ -30,15 +31,33 @@ with st.sidebar:
 Hindustan Aeronautics Limited (HAL) is an Indian state-owned aerospace and defence company. HAL is involved in the design, fabrication, and assembly of aircraft, jet engines, helicopters, and their spare parts.
 
 ---
-#### 👩‍💻 Developed by Abhiyanshu Anand and Ishaan Tripathi 👩‍💻
+#### 👩‍💻 Developed by Abhiyanshu Anand, Ishaan Tripathi, and Suryansh Singh 👩‍💻
 """)
     st.markdown("---")
+    with st.expander("Help / About"):
+        st.markdown("""
+        **How to Use:**
+        - Upload at least one reference image (no defect) and one test image (to check).
+        - For best results, use images with similar scale, angle, and lighting.
+        - Review the marked images and defect masks for detected issues.
+        - Download the summary or sample images as needed.
+        
+        **About:**
+        - This app detects defects in aircraft parts using SSIM, Color/DeltaE, and optional AI.
+        - Developed for HAL by Abhiyanshu Anand, Ishaan Tripathi, and Suryansh Singh.
+        """)
+    # --- Sample Image Download Button ---
+    try:
+        with open("sample_reference.jpg", "rb") as file:
+            st.download_button("Download Sample Reference", file, "sample_reference.jpg")
+    except Exception:
+        pass
 st.markdown(
     '''
     <div style="text-align: center;">
         <h2 style="margin-bottom: 0.2em;">🛠️ HAL Parts Defect Detection System 🛠️</h2>
         <h3 style="margin: 0.2em 0;">🛰️ Hindustan Aeronautics Limited (HAL)</h3>
-        <h4 style="margin-top: 0.2em;">👩‍💻 Developed by Abhiyanshu Anand and Ishaan Tripathi 👩‍💻</h4>
+        <h4 style="margin-top: 0.2em;">👩‍💻 Developed by Abhiyanshu Anand, Ishaan Tripathi, and Suryansh Singh 👩‍💻</h4>
     </div>
     <hr>
     ''',
@@ -169,6 +188,25 @@ def detect_pattern_defects(ref_img, test_img, min_matches=10):
     num_matches = len(matches)
     return pattern_img, num_matches
 
+# --- Blur and Lighting Detection Functions ---
+def is_blurry(img, threshold=100):
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    fm = cv2.Laplacian(gray, cv2.CV_64F).var()
+    return fm < threshold
+
+def is_bad_lighting(img, dark_thresh=40, bright_thresh=215):
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    mean = np.mean(gray)
+    if mean < dark_thresh:
+        return "dark"
+    elif mean > bright_thresh:
+        return "bright"
+    return None
+
+# Ensure feedback and difficult case directories exist
+os.makedirs('feedback_images', exist_ok=True)
+os.makedirs('difficult_cases', exist_ok=True)
+
 ref_files = st.file_uploader("📁 Upload Reference Images (Multi-Angle)", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
 test_files = st.file_uploader("🧪 Upload Test Images (Multi-Angle)", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
 model_file = st.file_uploader("🤖 (Optional) Upload YOLOv8 Model (.pt)", type=["pt"])
@@ -200,125 +238,160 @@ if ref_files and test_files:
             if test is None:
                 st.error(f"Uploaded test image {test_file_names[test_idx]} is not a valid image file.")
                 continue
-            st.markdown(f"## 🖼️ Reference {ref_idx+1} vs Test {test_idx+1}")
-            if ref is not None and test is not None:
-                test = auto_rotate_image(test, ref)
-            test_aligned = align_images(ref, test)
-            st.subheader("📸 Uploaded Images")
-            col1, col2 = st.columns(2)
-            with col1:
-                st.image(ref, channels="BGR", caption=f"🟢 Reference Image {ref_idx+1}")
-            with col2:
-                st.image(test, channels="BGR", caption=f"🔍 Test Image {test_idx+1}")
-            st.info(f"Alignment method used: ORB feature-based alignment")
-            if model_file:
-                st.subheader("🧠 YOLOv8 AI Detection")
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".pt") as tmp:
-                    tmp.write(model_file.read())
-                    model_path = tmp.name
-                model = YOLO(model_path)
-                results = model(test)
-                boxes = results[0].boxes.xyxy.cpu().numpy()
-                classes = results[0].boxes.cls.cpu().numpy()
-                confs = results[0].boxes.conf.cpu().numpy()
-                names = model.names
-                result_img = test.copy()
-                defect_table = []
-                for box, cls, conf in zip(boxes, classes, confs):
-                    if conf < yolo_conf_thresh:
-                        continue
-                    x1, y1, x2, y2 = map(int, box)
-                    label = names[int(cls)]
-                    cv2.rectangle(result_img, (x1, y1), (x2, y2), (255, 0, 0), 2)
-                    cv2.putText(result_img, f"{label} {conf:.2f}", (x1, y1 - 10),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
-                    defect_table.append({
-                        "x": x1, "y": y1, "width": x2 - x1, "height": y2 - y1,
-                        "confidence": f"{conf:.2f}", "defect_type": label
-                    })
-                st.subheader("📸 Side-by-Side Comparison (YOLO)")
+            # --- Blur and Lighting Checks ---
+            if is_blurry(test):
+                st.warning("⚠️ The test image appears blurry. Results may not be reliable.")
+            lighting = is_bad_lighting(test)
+            if lighting == "dark":
+                st.warning("⚠️ The test image is very dark. Try to improve lighting.")
+            elif lighting == "bright":
+                st.warning("⚠️ The test image is very bright. Try to reduce glare.")
+            try:
+                st.markdown(f"## 🖼️ Reference {ref_idx+1} vs Test {test_idx+1}")
+                if ref is not None and test is not None:
+                    test = auto_rotate_image(test, ref)
+                test_aligned = align_images(ref, test)
+                st.subheader("📸 Uploaded Images")
                 col1, col2 = st.columns(2)
                 with col1:
                     st.image(ref, channels="BGR", caption=f"🟢 Reference Image {ref_idx+1}")
                 with col2:
-                    st.image(result_img, channels="BGR", caption="📦 YOLOv8 Results")
-                if defect_table:
-                    st.subheader("📋 YOLOv8 Detected Defects")
-                    df = pd.DataFrame(defect_table)
-                    st.dataframe(df)
-                    csv = df.to_csv(index=False).encode()
-                    st.download_button(f"⬇️ Download YOLO Report (CSV) - Ref{ref_idx+1}_Test{test_idx+1}", csv, f"yolo_defect_report_ref{ref_idx+1}_test{test_idx+1}.csv", "text/csv")
-                    any_defect = True
-                    summary_rows.append({"Reference": ref_idx+1, "Test": test_idx+1, "Type": "YOLO", "Defect": True})
-                else:
-                    st.success("✅ No defects detected by YOLOv8 🎈")
-                    summary_rows.append({"Reference": ref_idx+1, "Test": test_idx+1, "Type": "YOLO", "Defect": False})
-            else:
-                st.subheader("🧠 AI Detected Defects (Image Comparison)")
-                ssim_marked, ssim_mask, ssim_percent = detect_ssim_defects(ref, test_aligned, ssim_thresh=ssim_thresh)
-                st.subheader("SSIM Defect Detection")
-                # Set a slightly smaller display size for all images
-                image_width = 210
-                image_height = 210
-                # Resize all SSIM images to the same size
-                ssim_marked_resized = cv2.resize(ssim_marked, (image_width, image_height), interpolation=cv2.INTER_AREA)
-                ssim_mask_resized = cv2.resize(ssim_mask, (image_width, image_height), interpolation=cv2.INTER_NEAREST)
-                ssim_diff = cv2.absdiff(cv2.cvtColor(ref, cv2.COLOR_BGR2GRAY), cv2.cvtColor(test_aligned, cv2.COLOR_BGR2GRAY))
-                ssim_diff_resized = cv2.resize(ssim_diff, (image_width, image_height), interpolation=cv2.INTER_AREA)
-                # Create a red overlay for the SSIM defect mask
-                ssim_mask_color = np.zeros_like(ssim_marked_resized)
-                if len(ssim_mask_resized.shape) == 2:
-                    mask_bool = ssim_mask_resized > 0
-                    ssim_mask_color[mask_bool] = [255, 0, 0]  # Red for defects
-                # Blend with the test image for semi-transparent overlay
-                ssim_overlay = cv2.addWeighted(ssim_marked_resized, 0.7, ssim_mask_color, 0.6, 0)
-                # SSIM display with overlay
-                st.subheader("SSIM Defect Detection")
-                ssim_col1, ssim_spacer1, ssim_col2, ssim_spacer2, ssim_col3 = st.columns([1,0.1,1,0.1,1])
-                with ssim_col1:
-                    st.image(ssim_marked_resized, channels="BGR", caption=f"SSIM Marked (Area: {ssim_percent:.2f}%)", width=image_width)
-                with ssim_col2:
-                    st.image(ssim_overlay, channels="BGR", caption="SSIM Defect Mask (Overlay)", width=image_width)
-                with ssim_col3:
-                    st.image(ssim_diff_resized, caption="SSIM Diff Image", clamp=True, width=image_width)
-                # Color/DeltaE
-                color_marked, color_mask, color_percent, delta_e_map = detect_color_defects_with_map(ref, test_aligned, color_thresh=color_thresh)
-                color_marked_resized = cv2.resize(color_marked, (image_width, image_height), interpolation=cv2.INTER_AREA)
-                color_mask_resized = cv2.resize(color_mask, (image_width, image_height), interpolation=cv2.INTER_NEAREST)
-                delta_e_map_resized = cv2.resize(delta_e_map, (image_width, image_height), interpolation=cv2.INTER_AREA)
-                st.subheader("Color/DeltaE Defect Detection")
-                color_col1, color_spacer1, color_col2, color_spacer2, color_col3 = st.columns([1,0.1,1,0.1,1])
-                with color_col1:
-                    st.image(color_marked_resized, channels="BGR", caption=f"Color/DeltaE Marked (Area: {color_percent:.2f}%)", width=image_width)
-                with color_col2:
-                    st.image(color_mask_resized, caption="Color/DeltaE Defect Mask", clamp=True, width=image_width)
-                with color_col3:
-                    st.image(delta_e_map_resized, caption="DeltaE Map", clamp=True, width=image_width)
-                if ssim_percent > 0.5:
-                    st.error(f"⚠️ Defects Found: {ssim_percent:.2f}% of the area")
-                    any_defect = True
-                    summary_rows.append({"Reference": ref_idx+1, "Test": test_idx+1, "Type": "SSIM", "Defect": True})
-                else:
-                    st.success("✅ No major defects detected 🎈")
-                    summary_rows.append({"Reference": ref_idx+1, "Test": test_idx+1, "Type": "SSIM", "Defect": False})
-                if color_percent > 0.5:
-                    st.error(f"⚠️ Color Defects Found: {color_percent:.2f}% of the area")
-                    any_defect = True
-                    summary_rows.append({"Reference": ref_idx+1, "Test": test_idx+1, "Type": "Color", "Defect": True})
-                else:
-                    st.success("✅ No major color defects detected 🎈")
-                    summary_rows.append({"Reference": ref_idx+1, "Test": test_idx+1, "Type": "Color", "Defect": False})
-                if pattern_toggle:
-                    st.subheader("🔳 Pattern Defect Detection (ORB)")
-                    pattern_img, num_matches = detect_pattern_defects(ref, test_aligned, min_matches=pattern_min_matches)
-                    st.image(pattern_img, channels="BGR", caption=f"Pattern Matching (ORB) - Matches: {num_matches}")
-                    if num_matches < pattern_min_matches:
-                        st.error("⚠️ Pattern mismatch detected!")
+                    st.image(test, channels="BGR", caption=f"🔍 Test Image {test_idx+1}")
+                st.info(f"Alignment method used: ORB feature-based alignment")
+                if model_file:
+                    st.subheader("🧠 YOLOv8 AI Detection")
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=".pt") as tmp:
+                        tmp.write(model_file.read())
+                        model_path = tmp.name
+                    model = YOLO(model_path)
+                    results = model(test)
+                    boxes = results[0].boxes.xyxy.cpu().numpy()
+                    classes = results[0].boxes.cls.cpu().numpy()
+                    confs = results[0].boxes.conf.cpu().numpy()
+                    names = model.names
+                    result_img = test.copy()
+                    defect_table = []
+                    for box, cls, conf in zip(boxes, classes, confs):
+                        if conf < yolo_conf_thresh:
+                            continue
+                        x1, y1, x2, y2 = map(int, box)
+                        label = names[int(cls)]
+                        cv2.rectangle(result_img, (x1, y1), (x2, y2), (255, 0, 0), 2)
+                        cv2.putText(result_img, f"{label} {conf:.2f}", (x1, y1 - 10),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
+                        defect_table.append({
+                            "x": x1, "y": y1, "width": x2 - x1, "height": y2 - y1,
+                            "confidence": f"{conf:.2f}", "defect_type": label
+                        })
+                    st.subheader("📸 Side-by-Side Comparison (YOLO)")
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.image(ref, channels="BGR", caption=f"🟢 Reference Image {ref_idx+1}")
+                    with col2:
+                        st.image(result_img, channels="BGR", caption="📦 YOLOv8 Results")
+                    if defect_table:
+                        st.subheader("📋 YOLOv8 Detected Defects")
+                        df = pd.DataFrame(defect_table)
+                        st.dataframe(df)
+                        csv = df.to_csv(index=False).encode()
+                        st.download_button(f"⬇️ Download YOLO Report (CSV) - Ref{ref_idx+1}_Test{test_idx+1}", csv, f"yolo_defect_report_ref{ref_idx+1}_test{test_idx+1}.csv", "text/csv")
                         any_defect = True
-                        summary_rows.append({"Reference": ref_idx+1, "Test": test_idx+1, "Type": "Pattern", "Defect": True})
+                        summary_rows.append({"Reference": ref_idx+1, "Test": test_idx+1, "Type": "YOLO", "Defect": True})
                     else:
-                        st.success("✅ Pattern matches are sufficient 🎈")
-                        summary_rows.append({"Reference": ref_idx+1, "Test": test_idx+1, "Type": "Pattern", "Defect": False})
+                        st.success("✅ No defects detected by YOLOv8 🎈")
+                        summary_rows.append({"Reference": ref_idx+1, "Test": test_idx+1, "Type": "YOLO", "Defect": False})
+                else:
+                    st.subheader("🧠 AI Detected Defects (Image Comparison)")
+                    ssim_marked, ssim_mask, ssim_percent = detect_ssim_defects(ref, test_aligned, ssim_thresh=ssim_thresh)
+                    # Calculate SSIM score for similarity check
+                    ref_resized = cv2.resize(ref, (512, 512))
+                    test_aligned_resized = cv2.resize(test_aligned, (512, 512))
+                    ssim_score, _ = ssim(cv2.cvtColor(ref_resized, cv2.COLOR_BGR2GRAY), cv2.cvtColor(test_aligned_resized, cv2.COLOR_BGR2GRAY), full=True)
+                    if ssim_score < 0.2:
+                        st.error("❗ The reference and test images are completely different. Defect detection results may not be meaningful. Please check your image pair.")
+                        continue
+                    st.subheader("SSIM Defect Detection")
+                    # Set a slightly smaller display size for all images
+                    image_width = 210
+                    image_height = 210
+                    # Resize all SSIM images to the same size
+                    ssim_marked_resized = cv2.resize(ssim_marked, (image_width, image_height), interpolation=cv2.INTER_AREA)
+                    ssim_mask_resized = cv2.resize(ssim_mask, (image_width, image_height), interpolation=cv2.INTER_NEAREST)
+                    ssim_diff = cv2.absdiff(cv2.cvtColor(ref, cv2.COLOR_BGR2GRAY), cv2.cvtColor(test_aligned, cv2.COLOR_BGR2GRAY))
+                    ssim_diff_resized = cv2.resize(ssim_diff, (image_width, image_height), interpolation=cv2.INTER_AREA)
+                    # Create a red overlay for the SSIM defect mask
+                    ssim_mask_color = np.zeros_like(ssim_marked_resized)
+                    if len(ssim_mask_resized.shape) == 2:
+                        mask_bool = ssim_mask_resized > 0
+                        ssim_mask_color[mask_bool] = [255, 0, 0]  # Red for defects
+                    # Blend with the test image for semi-transparent overlay
+                    ssim_overlay = cv2.addWeighted(ssim_marked_resized, 0.7, ssim_mask_color, 0.6, 0)
+                    # SSIM display with overlay
+                    st.subheader("SSIM Defect Detection")
+                    ssim_col1, ssim_spacer1, ssim_col2, ssim_spacer2, ssim_col3 = st.columns([1,0.1,1,0.1,1])
+                    with ssim_col1:
+                        st.image(ssim_marked_resized, channels="BGR", caption=f"SSIM Marked (Area: {ssim_percent:.2f}%)", width=image_width)
+                    with ssim_col2:
+                        st.image(ssim_overlay, channels="BGR", caption="SSIM Defect Mask (Overlay)", width=image_width)
+                    with ssim_col3:
+                        st.image(ssim_diff_resized, caption="SSIM Diff Image", clamp=True, width=image_width)
+                    # Color/DeltaE
+                    color_marked, color_mask, color_percent, delta_e_map = detect_color_defects_with_map(ref, test_aligned, color_thresh=color_thresh)
+                    color_marked_resized = cv2.resize(color_marked, (image_width, image_height), interpolation=cv2.INTER_AREA)
+                    color_mask_resized = cv2.resize(color_mask, (image_width, image_height), interpolation=cv2.INTER_NEAREST)
+                    delta_e_map_resized = cv2.resize(delta_e_map, (image_width, image_height), interpolation=cv2.INTER_AREA)
+                    st.subheader("Color/DeltaE Defect Detection")
+                    color_col1, color_spacer1, color_col2, color_spacer2, color_col3 = st.columns([1,0.1,1,0.1,1])
+                    with color_col1:
+                        st.image(color_marked_resized, channels="BGR", caption=f"Color/DeltaE Marked (Area: {color_percent:.2f}%)", width=image_width)
+                    with color_col2:
+                        st.image(color_mask_resized, caption="Color/DeltaE Defect Mask", clamp=True, width=image_width)
+                    with color_col3:
+                        st.image(delta_e_map_resized, caption="DeltaE Map", clamp=True, width=image_width)
+                    if ssim_percent > 0.5:
+                        st.error(f"⚠️ Defects Found: {ssim_percent:.2f}% of the area")
+                        any_defect = True
+                        summary_rows.append({"Reference": ref_idx+1, "Test": test_idx+1, "Type": "SSIM", "Defect": True})
+                    else:
+                        st.success("✅ No major defects detected 🎈")
+                        summary_rows.append({"Reference": ref_idx+1, "Test": test_idx+1, "Type": "SSIM", "Defect": False})
+                    if color_percent > 0.5:
+                        st.error(f"⚠️ Color Defects Found: {color_percent:.2f}% of the area")
+                        any_defect = True
+                        summary_rows.append({"Reference": ref_idx+1, "Test": test_idx+1, "Type": "Color", "Defect": True})
+                    else:
+                        st.success("✅ No major color defects detected 🎈")
+                        summary_rows.append({"Reference": ref_idx+1, "Test": test_idx+1, "Type": "Color", "Defect": False})
+                    if pattern_toggle:
+                        st.subheader("🔳 Pattern Defect Detection (ORB)")
+                        pattern_img, num_matches = detect_pattern_defects(ref, test_aligned, min_matches=pattern_min_matches)
+                        st.image(pattern_img, channels="BGR", caption=f"Pattern Matching (ORB) - Matches: {num_matches}")
+                        if num_matches < pattern_min_matches:
+                            st.error("⚠️ Pattern mismatch detected!")
+                            any_defect = True
+                            summary_rows.append({"Reference": ref_idx+1, "Test": test_idx+1, "Type": "Pattern", "Defect": True})
+                        else:
+                            st.success("✅ Pattern matches are sufficient 🎈")
+                            summary_rows.append({"Reference": ref_idx+1, "Test": test_idx+1, "Type": "Pattern", "Defect": False})
+                # --- User Feedback Button for Continuous Learning ---
+                if st.button(f'Mark as Incorrect Detection (Ref {ref_idx+1} / Test {test_idx+1})'):
+                    feedback_img_path = f'feedback_images/ref{ref_idx+1}_test{test_idx+1}_testimg.jpg'
+                    feedback_marked_path = f'feedback_images/ref{ref_idx+1}_test{test_idx+1}_marked.jpg'
+                    cv2.imwrite(feedback_img_path, test)
+                    cv2.imwrite(feedback_marked_path, ssim_marked)
+                    st.success('Thank you for your feedback! This case will be used to improve the model.')
+
+                # --- Automatic Logging of Difficult Cases ---
+                # (after SSIM score calculation and/or YOLO detection)
+                if 'ssim_score' in locals() and ssim_score < 0.25:
+                    diff_case_path = f'difficult_cases/ref{ref_idx+1}_test{test_idx+1}_ssim.jpg'
+                    cv2.imwrite(diff_case_path, test)
+                if 'confs' in locals() and any(conf < 0.3 for conf in confs):
+                    diff_case_path = f'difficult_cases/ref{ref_idx+1}_test{test_idx+1}_yolo.jpg'
+                    cv2.imwrite(diff_case_path, test)
+            except Exception as e:
+                logging.error(str(e))
+                st.error("An unexpected error occurred. Please try again or check the log file.")
     st.markdown("---")
     if summary_rows:
         st.subheader("📝 Multi-Angle, Multi-Reference Summary Table")
