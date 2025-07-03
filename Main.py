@@ -235,6 +235,7 @@ if ref_files and test_files:
         if ref is None:
             st.error(f"Uploaded reference image {ref_file.name} is not a valid image file.")
             continue
+        ref = robust_preprocess(ref)
         for test_idx, test_bytes in enumerate(test_file_bytes_list):
             if not test_bytes:
                 st.error(f"Test image file {test_file_names[test_idx]} is empty or could not be read.")
@@ -243,6 +244,7 @@ if ref_files and test_files:
             if test is None:
                 st.error(f"Uploaded test image {test_file_names[test_idx]} is not a valid image file.")
                 continue
+            test = robust_preprocess(test)
             # --- Blur and Lighting Checks ---
             if is_blurry(test):
                 st.warning("⚠️ The test image appears blurry. Results may not be reliable.")
