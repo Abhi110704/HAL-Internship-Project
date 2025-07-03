@@ -51,19 +51,32 @@ pip show streamlit opencv-python torch ultralytics scikit-image
 - Place `hal_logo.png` in the same folder as `M.py`.
 
 ### 6. **Run the App**
-You can use either of the following commands:
+You can use either of the following files as the entry point:
+
+#### Option 1: M.py (Classic UI)
 ```bash
 streamlit run M.py
 # or
 python -m streamlit run M.py
 ```
 
+#### Option 2: Main.py (Enhanced UI, More Feedback & Logging)
+```bash
+streamlit run Main.py
+# or
+python -m streamlit run Main.py
+```
+
+- **Both files provide the full defect detection workflow.**
+- **Main.py** includes additional user feedback, difficult case logging, and some advanced UI features.
+- **M.py** offers a classic, streamlined interface.
+
 ### 7. **First Run (SuperPoint Model Download)**
 - On first run, the SuperPoint model (`superpoint_v1.pth`) will be downloaded automatically if not present.
 
 ---
 
-## 📝 Usage
+## 📝 Usage (For Both M.py and Main.py)
 1. Upload one or more reference images (ideal, defect-free part).
 2. Upload one or more test images (parts to inspect, from any angle/zoom).
 3. (Optional) Upload a YOLOv8 `.pt` model for advanced detection.
@@ -138,4 +151,4 @@ This project is for educational and internal use at HAL. For other use, please c
 | Alignment           | SuperPoint, SIFT, ORB, Template Matching | torch, OpenCV |
 | Image Comparison    | SSIM, Thresholding, Contours | scikit-image, OpenCV|
 | Deep Learning       | YOLOv8                   | ultralytics          |
-| Reporting           | DataFrame, CSV           | pandas               | 
+| Reporting           | DataFrame, CSV           | pandas               |
