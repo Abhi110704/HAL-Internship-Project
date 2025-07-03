@@ -14,7 +14,6 @@ from skimage.restoration import denoise_bilateral
 from scipy.ndimage import binary_opening, binary_closing
 from skimage import measure
 import logging
-
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 LOGO_PATH = os.path.join(BASE_DIR, "hal_logo.png")
 st.set_page_config(page_title="🛠️ HAL Parts Defect Detection 🛠️", layout="centered")
@@ -66,9 +65,7 @@ st.markdown(
 color_toggle = st.checkbox("Enable Color Defect Detection", value=True)
 deltae_toggle = st.checkbox("Enable DeltaE (LAB) Color Defect Detection", value=True)
 pattern_toggle = st.checkbox("Enable Pattern Defect Detection", value=True)
-
 # Robust preprocessing for any image
-
 def robust_preprocess(img):
     if img is None:
         return None
@@ -88,7 +85,6 @@ def robust_preprocess(img):
     limg = cv2.merge((cl,a,b))
     img = cv2.cvtColor(limg, cv2.COLOR_LAB2BGR)
     return img
-
 def auto_rotate_image(test_img, ref_img):
     best_img = test_img
     best_score = -1
@@ -106,7 +102,6 @@ def auto_rotate_image(test_img, ref_img):
             best_score = score
             best_img = rotated_resized
     return best_img
-
 def align_images(ref_img, test_img):
     # Try ORB feature-based alignment
     ref_gray = cv2.cvtColor(ref_img, cv2.COLOR_BGR2GRAY)
@@ -127,7 +122,6 @@ def align_images(ref_img, test_img):
             return aligned_test
     # Fallback: auto-rotate
     return auto_rotate_image(test_img, ref_img)
-
 def draw_defect_boundaries(image, mask, color=(0, 0, 255), thickness=5):
     mask = (mask > 0).astype(np.uint8)
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -137,7 +131,6 @@ def draw_defect_boundaries(image, mask, color=(0, 0, 255), thickness=5):
         x, y, w, h = cv2.boundingRect(cnt)
         cv2.rectangle(overlay, (x, y), (x+w, y+h), (0,255,0), 3)
     return overlay
-
 def detect_ssim_defects(ref_img, test_img, ssim_thresh=220, diff_thresh=30):
     ref = cv2.resize(ref_img, (512, 512))
     test = cv2.resize(test_img, (512, 512))
@@ -173,7 +166,6 @@ def detect_ssim_defects(ref_img, test_img, ssim_thresh=220, diff_thresh=30):
         x, y, w, h = cv2.boundingRect(cnt)
         cv2.rectangle(marked, (x, y), (x+w, y+h), (0,255,0), 3)
     return marked, combined_mask*255, percent
-
 def detect_color_defects_with_map(ref_img, test_img, color_thresh=15):
     ref_lab = skcolor.rgb2lab(cv2.cvtColor(ref_img, cv2.COLOR_BGR2RGB))
     test_lab = skcolor.rgb2lab(cv2.cvtColor(test_img, cv2.COLOR_BGR2RGB))
@@ -191,7 +183,6 @@ def detect_color_defects_with_map(ref_img, test_img, color_thresh=15):
     if delta_e_color.shape[:2] != marked.shape[:2]:
         delta_e_color = cv2.resize(delta_e_color, (marked.shape[1], marked.shape[0]), interpolation=cv2.INTER_NEAREST)
     return marked, mask*255, percent, delta_e_color
-
 def detect_pattern_defects(ref_img, test_img, min_matches=10):
     ref_gray = cv2.cvtColor(ref_img, cv2.COLOR_BGR2GRAY)
     test_gray = cv2.cvtColor(test_img, cv2.COLOR_BGR2GRAY)
@@ -206,13 +197,11 @@ def detect_pattern_defects(ref_img, test_img, min_matches=10):
     pattern_img = cv2.drawMatches(ref_img, kp1, test_img, kp2, matches[:min_matches], None, flags=2)
     num_matches = len(matches)
     return pattern_img, num_matches
-
 # --- Blur and Lighting Detection Functions ---
 def is_blurry(img, threshold=100):
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     fm = cv2.Laplacian(gray, cv2.CV_64F).var()
     return fm < threshold
-
 def is_bad_lighting(img, dark_thresh=40, bright_thresh=215):
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     mean = np.mean(gray)
@@ -221,15 +210,12 @@ def is_bad_lighting(img, dark_thresh=40, bright_thresh=215):
     elif mean > bright_thresh:
         return "bright"
     return None
-
 # Ensure feedback and difficult case directories exist
 os.makedirs('feedback_images', exist_ok=True)
 os.makedirs('difficult_cases', exist_ok=True)
-
 ref_files = st.file_uploader("📁 Upload Reference Images (Multi-Angle)", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
 test_files = st.file_uploader("🧪 Upload Test Images (Multi-Angle)", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
 model_file = st.file_uploader("🤖 (Optional) Upload YOLOv8 Model (.pt)", type=["pt"])
-
 if ref_files and test_files:
     any_defect = False
     summary_rows = []
@@ -399,7 +385,6 @@ if ref_files and test_files:
                         cv2.imwrite(feedback_img_path, test)
                         cv2.imwrite(feedback_marked_path, ssim_marked)
                         st.success('Thank you for your feedback! This case will be used to improve the model.')
-
                     # --- Automatic Logging of Difficult Cases ---
                     # (after SSIM score calculation and/or YOLO detection)
                     if 'ssim_score' in locals() and ssim_score < 0.25:
